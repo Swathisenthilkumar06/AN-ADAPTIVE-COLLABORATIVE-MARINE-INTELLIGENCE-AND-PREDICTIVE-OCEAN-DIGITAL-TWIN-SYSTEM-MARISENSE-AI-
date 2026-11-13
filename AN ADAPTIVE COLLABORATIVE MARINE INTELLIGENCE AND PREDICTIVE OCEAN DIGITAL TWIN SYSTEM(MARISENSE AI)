@@ -1,0 +1,306 @@
+import com.sun.net.httpserver.{HttpExchange, HttpHandler, HttpServer}
+import java.net.{InetSocketAddress, URLDecoder}
+import java.nio.charset.StandardCharsets
+import java.time.Instant
+import java.util.concurrent.Executors
+import scala.collection.mutable
+import scala.util.Random
+object MarisenseApp:
+ private val port = 8502
+ private val accounts = Map("fisherman" -> "fish123", "cargo" -> "cargo123")
+ private val records = MarineData.generate(12)
+ def main(args: Array[String]): Unit =
+ val server = HttpServer.create(InetSocketAddress("0.0.0.0", port), 0)
+ server.createContext("/", new AppHandler)
+ server.setExecutor(Executors.newFixedThreadPool(8))
+ server.start()
+ println(s"MARISENSE AI Scala app running at http://localhost:$port")
+ private final class AppHandler extends HttpHandler:
+ override def handle(exchange: HttpExchange): Unit =
+ try
+ val path = exchange.getRequestURI.getPath 22
+ val method = exchange.getRequestMethod
+ if method == "POST" && path == "/login" then login(exchange)
+ else if path == "/logout" then logout(exchange)
+ else if path == "/switch" then switchRole(exchange)
+ else if method == "GET" && path == "/" then page(exchange)
+ else respond(exchange, 404, "Not found")
+ catch
+ case error: Exception =>
+ error.printStackTrace()
+ respond(exchange, 500, "Internal server error")
+ private def page(exchange: HttpExchange): Unit =
+ val role = cookie(exchange, "marisense-role")
+ role match
+ case Some(activeRole) if accounts.contains(activeRole) => respond(exchange, 200, 
+dashboard(activeRole))
+ case _ => respond(exchange, 200, loginPage())
+ private def login(exchange: HttpExchange): Unit =
+ val values = formValues(exchange)
+ val role = values.getOrElse("role", "fisherman")
+ val password = values.getOrElse("password", "")
+ if accounts.get(role).contains(password) then
+ exchange.getResponseHeaders.add("Set-Cookie", s"marisense-role=$role; Path=/; 
+SameSite=Lax")
+ redirect(exchange, "/")
+ else
+ respond(exchange, 401, loginPage(Some("Access denied. Use the demo password for the 
+selected bridge profile."))) 23
+ private def logout(exchange: HttpExchange): Unit =
+ exchange.getResponseHeaders.add("Set-Cookie", "marisense-role=; Max-Age=0; Path=/")
+ redirect(exchange, "/")
+ private def switchRole(exchange: HttpExchange): Unit =
+ val role = queryValues(exchange).getOrElse("role", "fisherman")
+ if accounts.contains(role) then
+ exchange.getResponseHeaders.add("Set-Cookie", s"marisense-role=$role; Path=/; 
+SameSite=Lax")
+ redirect(exchange, "/")
+ private def formValues(exchange: HttpExchange): Map[String, String] =
+ val body = String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
+ parsePairs(body)
+ private def queryValues(exchange: HttpExchange): Map[String, String] =
+ parsePairs(Option(exchange.getRequestURI.getRawQuery).getOrElse(""))
+ private def parsePairs(raw: String): Map[String, String] =
+ raw.split("&").toList.filter(_.nonEmpty).flatMap { pair =>
+ pair.split("=", 2).toList match
+ case key :: value :: Nil => Some(decode(key) -> decode(value))
+ case _ => None
+ }.toMap
+ private def decode(value: String): String = URLDecoder.decode(value, 
+StandardCharsets.UTF_8)
+ private def cookie(exchange: HttpExchange, name: String): Option[String] = 24
+ Option(exchange.getRequestHeaders.getFirst("Cookie")).flatMap { raw =>
+ raw.split(";").map(_.trim).find(_.startsWith(s"$name="))
+ .map(_.drop(name.length + 1))
+ }
+ private def redirect(exchange: HttpExchange, location: String): Unit =
+ exchange.getResponseHeaders.add("Location", location)
+ exchange.sendResponseHeaders(303, -1)
+ exchange.close()
+ private def respond(exchange: HttpExchange, status: Int, body: String): Unit =
+ val bytes = body.getBytes(StandardCharsets.UTF_8)
+ exchange.getResponseHeaders.set("Content-Type", "text/html; charset=utf-8")
+ exchange.getResponseHeaders.set("Cache-Control", "no-store")
+ exchange.sendResponseHeaders(status, bytes.length)
+ exchange.getResponseBody.write(bytes)
+ exchange.close()
+ private def loginPage(error: Option[String] = None): String =
+ val errorHtml = error.map(message => s"<div class='error'>$message</div>").getOrElse("")
+ pageShell("Field Access", s"""
+ <main class="login-page">
+ <section class="login-hero">
+ <div class="eyebrow">MARISENSE AI // SCALA FIELD ACCESS</div>
+ <h1>Read the sea<br><em>before it shifts.</em></h1>
+ <p>One connected command layer for crews, catch intelligence, and the warnings that 
+matter before the next wave.</p>
+ <div class="signal-line"><span class="live-dot"></span> Network synchronized &nbsp; 
+/ &nbsp; AIS mesh online &nbsp; / &nbsp; Tamil voice ready</div> 25
+ </section>
+ <section class="access-grid">
+ <div class="signal-board">
+ <div class="eyebrow">OCEAN INTELLIGENCE LAYER</div>
+ <h2>A clearer picture of moving water.</h2>
+ <p>Trust-scored signals become one shared view for every vessel in the mesh.</p>
+ <div class="radar"><i></i></div>
+ <div class="metric-row">
+ <div><strong>12</strong><span>Vessels</span></div>
+ <div><strong>98%</strong><span>Mesh uptime</span></div>
+ <div><strong>24/7</strong><span>Watch mode</span></div>
+ </div>
+ </div>
+ <div class="gateway">
+ <div class="eyebrow">SECURE DEMO GATEWAY</div>
+ <h2>Choose your bridge profile</h2>
+ <p>Enter a role-specific view of the connected ocean.</p>
+ $errorHtml
+ <form method="post" action="/login">
+ <label>Bridge profile</label>
+ <select name="role">
+ <option value="fisherman">Fisherman</option>
+ <option value="cargo">Cargo Captain</option>
+ </select>
+ <label>Access key</label>
+ <input name="password" type="password" placeholder="Use the demo password" 
+required>
+ <button class="primary" type="submit">Enter command center 
+<span>→</span></button> 26
+ </form>
+ <div class="demo-hint">Fisherman: <b>fish123</b> &nbsp; / &nbsp; Cargo: 
+<b>cargo123</b></div>
+ </div>
+ </section>
+ <section class="role-grid">
+ <article class="role-card teal"><span class="role-tag">FISHING / 
+01</span><h3>Fisherman Portal</h3><p>Catch zones, weather shifts, Tamil hazard voice, and 
+nearby vessel signals.</p><small>COASTAL AWARENESS + MESH 
+RELAY</small></article>
+ <article class="role-card amber"><span class="role-tag">CARGO / 
+02</span><h3>Cargo Captain Portal</h3><p>Route confidence, fuel awareness, cargo safety, 
+and relayed intelligence.</p><small>ROUTE CONFIDENCE + SAFETY 
+RELAY</small></article>
+ </section>
+ </main>
+ """)
+ private def dashboard(role: String): String =
+ val mine = records.filter(_.vesselType == (if role == "fisherman" then "Fishing" else 
+"Cargo"))
+ val selected = mine.headOption.getOrElse(records.head)
+ val safe = records.count(_.risk == "Safe")
+ val warning = records.count(_.risk == "Warning")
+ val danger = records.count(_.risk == "Danger")
+ val fisherman = role == "fisherman"
+ val pageTitle = if fisherman then "கடல் காவலன் / Fisherman Command Deck" else 
+"Cargo Captain Command Deck"
+ val content = if fisherman then fishermanDashboard(selected, safe, warning, danger) else 
+cargoDashboard(selected, safe, warning, danger)
+ pageShell(pageTitle, s"""
+ <aside class="sidebar">
+ <div class="brand-mark">M<span>/</span>A</div> 27
+ <div class="side-title">MISSION CONTROLS</div>
+ <div class="side-copy">Role-specific maritime intelligence</div>
+ <div class="side-label">ACTIVE ROLE</div>
+ <a class="role-switch ${if fisherman then "selected" else ""}" 
+href="/switch?role=fisherman">● Fisherman</a>
+ <a class="role-switch ${if !fisherman then "selected amber-text" else ""}" 
+href="/switch?role=cargo">● Cargo Captain</a>
+ <a class="side-action" href="/logout">Return to access <span>↗</span></a>
+ <div class="side-divider"></div>
+ <div class="side-label">ACTIVE VESSEL</div>
+ <div class="vessel-pill">${selected.vesselId}<span>●</span></div>
+ <div class="side-footer">SCALA RUNTIME<br><span>LOCAL MESH / 
+ONLINE</span></div>
+ </aside>
+ <main class="dashboard">
+ <header class="dash-hero">
+ <div><div class="eyebrow">MARISENSE AI // LIVE 
+WATCH</div><h1>$pageTitle</h1><p>${selected.region} waters are reporting through the 
+connected mesh.</p></div>
+ <div class="hero-status"><span class="live-dot"></span> LIVE 
+MODE<br><b>${selected.vesselId} / ${selected.risk}</b></div>
+ </header>
+ <section class="stat-grid">
+ <div class="stat-card teal"><span>TOTAL 
+RECORDS</span><strong>${records.size}</strong><small>synthetic fleet 
+picture</small></div>
+ <div class="stat-card green"><span>SAFE</span><strong>$safe</strong><small>stable 
+sailing</small></div>
+ <div class="stat-card 
+amber"><span>WARNING</span><strong>$warning</strong><small>needs 
+attention</small></div>
+ <div class="stat-card 
+red"><span>DANGER</span><strong>$danger</strong><small>critical cases</small></div>
+ </section> 28
+ ${digitalTwin(selected)}
+ $content
+ </main>
+ """)
+ private def digitalTwin(row: MarineRecord): String =
+ s"""
+ <section class="twin-shell">
+ <div class="twin-header"><div><div class="eyebrow">OCEAN DIGITAL TWIN / LIVE 
+MODEL</div><h2>See the water before you move through it.</h2><p>A synchronized 
+simulation of ${row.region} using AIS position, sea state, mesh traffic, and environmental 
+signals.</p></div><div class="twin-state"><span class="live-
+dot"></span><b>SYNCED</b><small>last pulse 04 sec ago</small></div></div>
+ <div class="twin-layout">
+ <div class="twin-map" id="twinMap">
+ <div class="map-label top-left">${row.region.toUpperCase()} / DIGITAL 
+SURFACE</div>
+ <div class="map-label bottom-left">LAT 12.78 &nbsp; LON 80.31</div>
+ <div class="contour contour-one"></div><div class="contour contour-
+two"></div><div class="contour contour-three"></div>
+ <div class="current current-one"></div><div class="current current-two"></div>
+ <div class="twin-route"></div><div class="twin-node node-
+one"><i></i><span>${row.vesselId}</span></div><div class="twin-node node-
+two"><i></i><span>CS002</span></div><div class="twin-node node-
+three"><i></i><span>FB007</span></div>
+ <div class="twin-center"><i></i><b>YOU</b></div>
+ <div class="map-legend"><span><i class="legend-you"></i> own 
+vessel</span><span><i class="legend-mesh"></i> mesh vessel</span><span><i 
+class="legend-current"></i> current</span></div>
+ </div>
+ <div class="twin-console">
+ <div class="console-kicker">TWIN TELEMETRY</div>
+ <div class="telemetry-grid"><div><span>WAVE</span><b 
+id="waveValue">${row.waveHeight} 29
+m</b></div><div><span>WIND</span><b>${row.windSpeed} 
+km/h</b></div><div><span>AIS 
+LINK</span><b>${row.aisSignal}</b></div><div><span>TRUST</span><b>${row.trust
+Score}</b></div></div>
+ <div class="console-kicker layer-kicker">VISIBLE LAYERS</div>
+ <div class="layer-buttons"><button class="layer active" 
+onclick="toggleLayer(this,'current')">Current flow</button><button class="layer active" 
+onclick="toggleLayer(this,'route')">Mesh route</button><button class="layer active" 
+onclick="toggleLayer(this,'contour')">Depth contours</button></div>
+ <div class="scenario"><div><span>WHAT-IF SCENARIO</span><b 
+id="scenarioLabel">Calm window</b></div><input id="waveSlider" type="range" 
+min="0.1" max="8" step="0.1" value="${row.waveHeight}" 
+oninput="updateTwin(this.value)"><div class="scenario-
+scale"><span>CALM</span><span>ROUGH</span></div></div>
+ </div>
+ </div>
+ </section>
+ """
+ private def fishermanDashboard(row: MarineRecord, safe: Int, warning: Int, danger: Int): 
+String =
+ val tamil = tamilAlert(row)
+ val fish = row.fishSpecies.getOrElse("Mixed catch availability")
+ s"""
+ <section class="fisherman-banner">
+ <div><div class="eyebrow">கடல் காவலன் / FISHERMAN COMMAND 
+DECK</div><h2>உங்கள் கடல். உங்கள் முடிவு.</h2><p>Catch and safety 
+intelligence for <b>${row.vesselId}</b> sailing through ${row.region}.</p></div>
+ <div class="pulse-orbit"><i></i><span>AIS 
+PULSE</span><b>${row.aisSignal}</b></div>
+ </section>
+ <section class="insight-grid">
+ <article class="insight-card feature"><span class="card-kicker">CATCH 
+WINDOW</span><h3>Best catch focus</h3><strong>$fish</strong><p>Shared signals 
+suggest checking the local zone before deployment.</p></article> 30
+ <article class="insight-card"><span class="card-kicker">SEA 
+STATE</span><h3>${row.weather}</h3><div class="big-
+number">${row.waveHeight}m</div><p>Wave height / ${row.windSpeed} kmph 
+wind</p></article>
+ <article class="insight-card"><span class="card-kicker">TRUST 
+SIGNAL</span><h3>Mesh confidence</h3><div class="big-
+number">${row.trustScore}</div><p>AIS strength ${row.aisSignal} / 
+${row.neighbors.size} nearby nodes</p></article>
+ </section>
+ <section class="action-grid">
+ <article class="panel"><div class="panel-head"><span>HAZARD 
+INTIMATION</span><b>NOW</b></div><div class="hazard">⚠
+${row.hazard}</div><div class="hazard safe-line">✓ Safe operating conditions continue 
+under watch.</div><button class="voice" onclick="speakTamil(${json(tamil)})"> 
+தமிழ் குரல் எச்சரிக்கை</button><p class="hint">தமிழ் குரல்
+எச்சரிக்கையை கேட்க அழுத்தவும். Tamil voice will be selected automatically 
+when available.</p></article>
+ <article class="panel"><div class="panel-head"><span>FISHERMAN 
+RECOMMENDATION</span><b>AI BRIEF</b></div><ul 
+class="recommendations"><li>Check $fish catch conditions before 
+casting.</li><li>Keep AIS relay active near ${row.region}.</li><li>Monitor wind and 
+wave movement continuously.</li></ul><div class="relay">MESH RELAY 
+<b>${row.broadcast}</b></div></article>
+ </section>
+ <section class="panel table-panel"><div class="panel-head"><span>FLEET 
+PULSE</span><b>CONNECTED 
+VESSELS</b></div><table><tr><th>VESSEL</th><th>TYPE</th><th>REGION</th>
+<th>RISK</th><th>TRUST</th></tr>${records.take(6).map(r => 
+s"<tr><td>${r.vesselId}</td><td>${r.vesselType}</td><td>${r.region}</td><td><span 
+class='risk 
+${r.risk.toLowerCase}'>${r.risk}</span></td><td>${r.trustScore}</td></tr>").mkString
+}</table></section>
+ """
+ private def cargoDashboard(row: MarineRecord, safe: Int, warning: Int, danger: Int): 
+String =
+ private def tamilAlert(row: MarineRecord): String =
+ s"மீனவர்எச்சரிக்கை. ${row.vesselId} படகு, ${row.region} பகுதியில்
+உள்ளது. ஆபத்து நிலை ${row.risk}. காற்றின் வேகம் மணிக்கு
+${row.windSpeed} கில ோமீட்டர். அலை உயரம் ${row.waveHeight} மீட்டர். 
+${row.hazard}." 31
+ private def json(value: String): String =
+ "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+ private def pageShell(title: String, body: String): String =
+ s"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta 
+name="viewport" content="width=device-width,initial-scale=1"><title>$title | 
+MARISENSE 
+AI</title><style>${Styles.css}</style></head><body>$body<script>
